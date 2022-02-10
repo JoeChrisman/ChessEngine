@@ -13,12 +13,17 @@ void init()
 void run()
 {
     SDL_Event event;
+    Piece *pieceClicked;
 
     while (true)
     {
         SDL_RenderClear(renderer);
         if (SDL_PollEvent(&event))
         {
+            if (event.type == SDL_MOUSEBUTTONDOWN)
+            {
+                pieceClicked = board.onClicked(event.button.x, event.button.y);
+            }
             if (event.type == SDL_QUIT)
             {
                 return;

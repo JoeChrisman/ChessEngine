@@ -9,13 +9,19 @@ Square::Square(int row, int col)
     this -> row = row;
     this -> col = col;
     piece = nullptr;
-    bounds = SDL_Rect{col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE};
+    bounds = new SDL_Rect{col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE};
+    isHighlighted = false;
 }
 
 void Square::render(SDL_Renderer *renderer)
 {
+    // if the square should be highlighted
+    if (isHighlighted)
+    {
+        SDL_SetRenderDrawColor(renderer, HIGHLIGHT_R, HIGHLIGHT_G, HIGHLIGHT_B, 255);
+    }
     // if square should be a light square
-    if (row % 2 == col % 2)
+    else if (row % 2 == col % 2)
     {
         SDL_SetRenderDrawColor(renderer, LIGHT_R, LIGHT_G, LIGHT_B, 255);
     }
@@ -24,11 +30,11 @@ void Square::render(SDL_Renderer *renderer)
     {
         SDL_SetRenderDrawColor(renderer, DARK_R, DARK_G, DARK_B, 255);
     }
-    SDL_RenderFillRect(renderer, &bounds);
+    SDL_RenderFillRect(renderer, bounds);
 
     // if there is a piece on this square render the piece
     if (piece != nullptr)
     {
-        piece -> render(renderer, &bounds);
+        piece -> render(renderer, bounds);
     }
 }

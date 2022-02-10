@@ -13,7 +13,8 @@ public:
     int col;
 
     Piece *piece;
-    SDL_Rect bounds;
+    SDL_Rect *bounds;
+    bool isHighlighted;
 
     Square(int row, int col);
     void render(SDL_Renderer *renderer);

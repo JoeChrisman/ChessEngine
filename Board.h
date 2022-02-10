@@ -22,6 +22,10 @@ public:
     Piece *blackKing;
 
     void render(SDL_Renderer *renderer);
+    Piece* onClicked(int x, int y);
+    void resetHighlights();
+    bool isOnBoard(int row, int col);
+    std::vector<Square*> getMoves(Piece *moving);
 
 };
 
