@@ -12,6 +12,9 @@ Board::Board()
     whitePieces = std::vector<Piece*>();
     blackPieces = std::vector<Piece*>();
 
+    pieceClicked = nullptr;
+    lastMoved = nullptr;
+
     int whitePawnRow = ENGINE_IS_BLACK ? 6 : 1;
     int whitePieceRow = ENGINE_IS_BLACK ? 7 : 0;
     int blackPawnRow = ENGINE_IS_BLACK ? 1 : 6;
@@ -63,7 +66,7 @@ Board::Board()
                     whitePieces.push_back(addedPiece);
                     if (addedPiece -> type == KING)
                     {
-                        // if we added a king remember it
+                        // if we added a white king remember it
                         whiteKing = addedPiece;
                     }
                 }
@@ -73,7 +76,7 @@ Board::Board()
                     blackPieces.push_back(addedPiece);
                     if (addedPiece -> type == KING)
                     {
-                        // if we added a king remember it
+                        // if we added a black king remember it
                         blackKing = addedPiece;
                     }
                 }
@@ -81,6 +84,11 @@ Board::Board()
         }
         // add the rank to the board
         board[row] = rank;
+    }
+
+    if (!ENGINE_IS_BLACK)
+    {
+        makeBestMove();
     }
 }
 
@@ -97,7 +105,108 @@ void Board::render(SDL_Renderer *renderer)
     }
 }
 
-Piece* Board::onClicked(int x, int y)
+void Board::removePiece(Piece *toRemove)
+{
+    // get a pointer to whatever piece color vector we need
+    std::vector<Piece*> *pieces = toRemove -> isWhite ? &whitePieces : &blackPieces;
+    // remove piece from the vector
+    auto removalIndex = std::find(pieces -> begin(), pieces -> end(), toRemove);
+    if (removalIndex != pieces -> end())
+    {
+        pieces -> erase(removalIndex);
+    }
+}
+
+void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &piecesRemoved)
+{
+    int rowFrom = moving -> row;
+    int colFrom = moving -> col;
+    int rowTo = targetSquare -> row;
+    int colTo = targetSquare -> col;
+    PIECE_TYPE type = moving -> type;
+
+    // remove piece we are moving from the board
+    board[rowFrom][colFrom] -> piece = nullptr;
+
+    Piece *captured = targetSquare -> piece;
+    // if we captured a piece
+    if (captured != nullptr)
+    {
+        // remember pieces we remove
+        piecesRemoved.push_back(captured);
+        // remove captured piece
+        removePiece(captured);
+    }
+    // if we are moving a pawn
+    if (type == PAWN)
+    {
+        // if we captured a pawn en passant
+        if (targetSquare -> col != moving -> col && captured == nullptr)
+        {
+            // remember en passant captured pawn and remove it from the board
+            captured = board[rowFrom][colTo] -> piece;
+            board[rowFrom][colTo] -> piece = nullptr;
+            // remember pieces we remove
+            piecesRemoved.push_back(captured);
+            // remove en passant captured pawn
+            removePiece(captured);
+        }
+        // if we are promoting a pawn
+        if (rowTo == 0 || rowTo == 7)
+        {
+            // remember pieces we remove
+            piecesRemoved.push_back(moving);
+            // remove pawn we promoted
+            removePiece(moving);
+            // promote to a queen
+            moving = new Piece(moving -> isWhite, QUEEN, rowTo, colTo);
+            // offset for when we actually move the promoted queen to the square
+            moving -> timesMoved = -1;
+            // add promoted queen
+            if (moving -> isWhite)
+            {
+                whitePieces.push_back(moving);
+            }
+            else
+            {
+                blackPieces.push_back(moving);
+            }
+        }
+    }
+    // if we are castling
+    if (type == KING && abs(colFrom - colTo) > 1)
+    {
+        // if we are castling left
+        if (colTo < 4)
+        {
+            // move left rook to right of king
+            Piece *leftRook = board[rowTo][0] -> piece;
+            leftRook -> col = colTo + 1;
+            leftRook -> timesMoved++;
+            board[rowTo][colTo + 1] -> piece = leftRook;
+            board[rowTo][0] -> piece = nullptr;
+        }
+        // if we are castling right
+        else
+        {
+            // move right rook to left of king
+            Piece *rightRook = board[rowTo][7] -> piece;
+            rightRook -> col = colTo - 1;
+            rightRook -> timesMoved++;
+            board[rowTo][colTo - 1] -> piece = rightRook;
+            board[rowTo][7] -> piece = nullptr;
+        }
+    }
+
+    moving -> row = rowTo;
+    moving -> col = colTo;
+    moving -> timesMoved++;
+    targetSquare -> piece = moving;
+
+    lastMoved = moving;
+}
+
+void Board::onClicked(int x, int y)
 {
     SDL_Point *mouse = new SDL_Point{x, y};
     for (auto &rank : board)
@@ -106,10 +215,23 @@ Piece* Board::onClicked(int x, int y)
         {
             if (SDL_PointInRect(mouse, square -> bounds))
             {
-                resetHighlights();
                 Piece *piece = square -> piece;
+                // if user clicked a move option square
+                if (square -> isHighlighted)
+                {
+                    // move the piece the user is moving
+                    std::vector<Piece*> piecesRemoved;
+                    movePiece(pieceClicked, square, piecesRemoved);
+                    // remember the last piece moved for en passant rights
+                    lastMoved = pieceClicked;
+
+                    makeBestMove();
+                }
+                resetHighlights();
                 if (piece != nullptr && piece -> isWhite == ENGINE_IS_BLACK)
                 {
+                    // remember piece the player wants to move
+                    pieceClicked = piece;
                     // highlight legal moves
                     std::vector<Square*> moves = getMoves(piece);
                     for (Square* &move : moves)
@@ -117,14 +239,55 @@ Piece* Board::onClicked(int x, int y)
                         move -> isHighlighted = true;
                     }
                 }
-                if (square -> isHighlighted)
-                {
-                    // movePiece(piece, square);
-                }
-                return piece;
             }
         }
     }
+}
+
+void Board::makeBestMove()
+{
+    // for now, we will select a random move to serve as a fake engine
+    std::vector<Square*> moves;
+    Piece *pieceToMove;
+
+    int tries = 0;
+    while (moves.empty())
+    {
+        // choose a random piece of the color we want to move
+        if (ENGINE_IS_BLACK)
+        {
+            // no legal moves possible because there are no pieces. this will never happen in real chess.
+            if (blackPieces.empty())
+            {
+                // don't move
+                return;
+            }
+            pieceToMove = blackPieces[rand() % blackPieces.size()];
+        }
+        else
+        {
+            // no legal moves possible becaue there are no pieces. this will never happen in real chess.
+            if (whitePieces.empty())
+            {
+                // don't move
+                return;
+            }
+            pieceToMove = whitePieces[rand() % whitePieces.size()];
+        }
+        moves = getMoves(pieceToMove);
+
+        // this means we looked through all our pieces and none of them have any moves
+        if (tries++ > 64)
+        {
+            // so just don't move
+            return;
+        }
+    }
+
+    Square *move = moves[rand() % moves.size()];
+    std::vector<Piece*> piecesRemoved;
+    movePiece(pieceToMove, move, piecesRemoved);
+
 }
 
 void Board::resetHighlights()
@@ -154,9 +317,16 @@ std::vector<Square*> Board::getMoves(Piece *moving)
 
     std::vector<Square*> moves;
 
+    // if we are moving a pawn
     if (type == PAWN)
     {
-        int direction = ENGINE_IS_BLACK ? -1 : 1;
+        // figure out which way this pawn is going
+        int direction = isWhite ? 1 : -1;
+        if (ENGINE_IS_BLACK)
+        {
+            direction *= -1;
+        }
+
         // check for the pawn moving one square
         Square *oneSquareAhead = board[row + direction][col];
         if (oneSquareAhead -> piece == nullptr)
@@ -181,6 +351,16 @@ std::vector<Square*> Board::getMoves(Piece *moving)
             {
                 moves.push_back(leftCapture);
             }
+            // check for left en passant capture
+            Piece *passantCapture = board[row][col - 1] -> piece;
+            if (passantCapture == lastMoved && passantCapture -> timesMoved == 1)
+            {
+                if (passantCapture -> type == PAWN && (row == 3 || row == 4))
+                {
+                    moves.push_back(board[row + direction][col - 1]);
+                }
+            }
+
         }
         // don't go off the edge of the board
         if (col < 7)
@@ -191,33 +371,44 @@ std::vector<Square*> Board::getMoves(Piece *moving)
             {
                 moves.push_back(rightCapture);
             }
-        }
-
-    }
-    else if (type == KNIGHT)
-    {
-        // offsets for how a knight moves
-        int offsets[8][2] = {{-2, 1}, {-2, -1}, {2, -1}, {2, 1}, {1, 2}, {1, -2}, {-1, 2}, {-1, -2}};
-
-        // go through the offsets
-        for (int moveIndex = 0; moveIndex < 8; moveIndex++)
-        {
-            // figure out what square we landed on
-            int r = row + offsets[moveIndex][0];
-            int c = col + offsets[moveIndex][1];
-            if (isOnBoard(r, c))
+            // check for right en passant capture
+            Piece *passantCapture = board[row][col + 1] -> piece;
+            if (passantCapture == lastMoved && passantCapture -> timesMoved == 1)
             {
-                Square *move = board[r][c];
-                // if our landing square is empty or is a capture square
-                if (move -> piece == nullptr || move -> piece -> isWhite != ENGINE_IS_BLACK)
+                if (passantCapture -> type == PAWN && (row == 3 || row == 4))
                 {
-                    moves.push_back(board[r][c]);
+                    moves.push_back(board[row + direction][col + 1]);
                 }
             }
 
         }
 
     }
+    // if we are moving a knight
+    else if (type == KNIGHT)
+    {
+        // offsets for how a knight moves
+        int offsets[8][2] = {{-2, 1}, {-2, -1}, {2, -1}, {2, 1}, {1, 2}, {1, -2}, {-1, 2}, {-1, -2}};
+
+        // go through the offsets
+        for (auto &offset : offsets)
+        {
+            // figure out what square we landed on
+            int r = row + offset[0];
+            int c = col + offset[1];
+            if (isOnBoard(r, c))
+            {
+                Square *move = board[r][c];
+                // if our landing square is empty or is a capture square
+                if (move -> piece == nullptr || move -> piece -> isWhite != isWhite)
+                {
+                    // that square is a legal knight move
+                    moves.push_back(board[r][c]);
+                }
+            }
+        }
+    }
+    // if we are moving a king
     else if (type == KING)
     {
         // offset king's x
@@ -232,7 +423,7 @@ std::vector<Square*> Board::getMoves(Piece *moving)
                     // figure out where we moved to
                     int x = col + dx;
                     int y = row + dy;
-                    // make sure we dont go off the board
+                    // make sure we don't go off the board
                     if (isOnBoard(y, x))
                     {
                         Square *move = board[y][x];
@@ -244,7 +435,46 @@ std::vector<Square*> Board::getMoves(Piece *moving)
                 }
             }
         }
+        // check if we can castle
+        if (moving -> timesMoved == 0)
+        {
+            Piece *leftRook = board[row][0] -> piece;
+            Piece *rightRook = board[row][7] -> piece;
+            // check if we can castle left
+            if (leftRook != nullptr && leftRook -> timesMoved == 0)
+            {
+                // make sure no pieces are in between rook and king
+                for (int x = 1; x < col; x++)
+                {
+                    if (board[row][x] -> piece != nullptr)
+                    {
+                        break;
+                    }
+                    if (x == col - 1)
+                    {
+                        moves.push_back(board[row][col - 2]);
+                    }
+                }
+            }
+            // check if we can castle right
+            if (rightRook != nullptr && rightRook -> timesMoved == 0)
+            {
+                // make sure no pieces are in between rook and king
+                for (int x = col + 1; x < rightRook -> col; x++)
+                {
+                    if (board[row][x] -> piece != nullptr)
+                    {
+                        break;
+                    }
+                    if (x == rightRook -> col - 1)
+                    {
+                        moves.push_back(board[row][col + 2]);
+                    }
+                }
+            }
+        }
     }
+    // if we are moving bishop or queen
     else if (type == BISHOP || type == QUEEN)
     {
         // check each diagonal
@@ -262,20 +492,29 @@ std::vector<Square*> Board::getMoves(Piece *moving)
                     break;
                 }
                 Square *move = board[r][c];
-                // if the destination square was empty or a capture square
-                if (move -> piece == nullptr || move -> piece -> isWhite != isWhite)
+                // if the destination square was an empty square
+                if (move -> piece == nullptr)
                 {
                     // add it as a move
                     moves.push_back(move);
                 }
+                // if the destination square was a capture square
+                else if (move -> piece -> isWhite != isWhite)
+                {
+                    // add it as a move
+                    moves.push_back(move);
+                    // don't jump over captures
+                    break;
+                }
                 else
                 {
+                    // don't jump over pieces
                     break;
                 }
             }
         }
-
     }
+    // if we are moving rook or queen
     if (type == ROOK || type == QUEEN)
     {
         // check each cardinal direction
@@ -302,13 +541,21 @@ std::vector<Square*> Board::getMoves(Piece *moving)
                     break;
                 }
                 Square *move = board[y][x];
-                // if the destination square is empty or is a capture square
-                if (move -> piece == nullptr || move -> piece -> isWhite != isWhite)
+                // if the destination square is an empty square
+                if (move -> piece == nullptr)
                 {
                     moves.push_back(move);
                 }
+                // if the destination square is a capture square
+                else if (move -> piece -> isWhite != isWhite)
+                {
+                    // don't jump over captures
+                    moves.push_back(move);
+                    break;
+                }
                 else
                 {
+                    // don't jump over pieces
                     break;
                 }
             }

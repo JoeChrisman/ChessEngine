@@ -21,10 +21,19 @@ public:
     Piece *whiteKing;
     Piece *blackKing;
 
+    // keep track of last piece user clicked
+    Piece *pieceClicked;
+    // keep track of last piece moved for en passant
+    Piece *lastMoved;
+
     void render(SDL_Renderer *renderer);
-    Piece* onClicked(int x, int y);
+    void onClicked(int x, int y);
     void resetHighlights();
     bool isOnBoard(int row, int col);
+    void movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &piecesRemoved);
+    void removePiece(Piece *toRemove);
+    // make a random move
+    void makeBestMove();
     std::vector<Square*> getMoves(Piece *moving);
 
 };

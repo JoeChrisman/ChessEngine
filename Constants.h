@@ -7,9 +7,11 @@
 
 #include <vector>
 #include <string>
+#include <iostream>
+#include <cstdlib>
 #include "SDL2/SDL.h"
 
-const bool ENGINE_IS_BLACK = true;
+const bool ENGINE_IS_BLACK = false;
 
 enum PIECE_TYPE
 {
