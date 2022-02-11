@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include "SDL2/SDL.h"
 
-const bool ENGINE_IS_BLACK = false;
+const bool ENGINE_IS_BLACK = true;
 
 enum PIECE_TYPE
 {

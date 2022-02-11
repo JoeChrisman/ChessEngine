@@ -60,26 +60,7 @@ Board::Board()
             {
                 // add the piece to this square
                 square -> piece = addedPiece;
-                if (addedPiece -> isWhite)
-                {
-                    // add the white piece to white pieces
-                    whitePieces.push_back(addedPiece);
-                    if (addedPiece -> type == KING)
-                    {
-                        // if we added a white king remember it
-                        whiteKing = addedPiece;
-                    }
-                }
-                else
-                {
-                    // add the black piece to the black pieces
-                    blackPieces.push_back(addedPiece);
-                    if (addedPiece -> type == KING)
-                    {
-                        // if we added a black king remember it
-                        blackKing = addedPiece;
-                    }
-                }
+                addPiece(addedPiece);
             }
         }
         // add the rank to the board
@@ -105,6 +86,26 @@ void Board::render(SDL_Renderer *renderer)
     }
 }
 
+void Board::addPiece(Piece *toAdd)
+{
+    if (toAdd -> isWhite)
+    {
+        whitePieces.push_back(toAdd);
+        if (toAdd -> type == KING)
+        {
+            whiteKing = toAdd;
+        }
+    }
+    else
+    {
+        blackPieces.push_back(toAdd);
+        if (toAdd -> type == KING)
+        {
+            blackKing = toAdd;
+        }
+    }
+}
+
 void Board::removePiece(Piece *toRemove)
 {
     // get a pointer to whatever piece color vector we need
@@ -117,7 +118,13 @@ void Board::removePiece(Piece *toRemove)
     }
 }
 
-void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &piecesRemoved)
+// move a piece to a target square
+// the &piecesRemoved vector will end up being filled with pointers that looks like this
+// piecesRemoved[0] = piece captured
+// piecesRemoved[1] = pawn captured by en passant
+// piecesRemoved[2] = pawn removed when promoting
+// the piece* &moving may end up pointing to a queen if we promoted
+void Board::movePiece(Piece* &moving, Square *targetSquare, std::vector<Piece*> &piecesRemoved)
 {
     int rowFrom = moving -> row;
     int colFrom = moving -> col;
@@ -133,7 +140,7 @@ void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &
     if (captured != nullptr)
     {
         // remember pieces we remove
-        piecesRemoved.push_back(captured);
+        piecesRemoved[0] = captured;
         // remove captured piece
         removePiece(captured);
     }
@@ -141,21 +148,23 @@ void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &
     if (type == PAWN)
     {
         // if we captured a pawn en passant
-        if (targetSquare -> col != moving -> col && captured == nullptr)
+        if (colTo != colFrom && captured == nullptr)
         {
             // remember en passant captured pawn and remove it from the board
             captured = board[rowFrom][colTo] -> piece;
             board[rowFrom][colTo] -> piece = nullptr;
             // remember pieces we remove
-            piecesRemoved.push_back(captured);
+            piecesRemoved[1] = captured;
             // remove en passant captured pawn
             removePiece(captured);
         }
         // if we are promoting a pawn
         if (rowTo == 0 || rowTo == 7)
         {
+            // so we can decrement when we put the pawn back
+            moving -> timesMoved++;
             // remember pieces we remove
-            piecesRemoved.push_back(moving);
+            piecesRemoved[2] = moving;
             // remove pawn we promoted
             removePiece(moving);
             // promote to a queen
@@ -163,14 +172,7 @@ void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &
             // offset for when we actually move the promoted queen to the square
             moving -> timesMoved = -1;
             // add promoted queen
-            if (moving -> isWhite)
-            {
-                whitePieces.push_back(moving);
-            }
-            else
-            {
-                blackPieces.push_back(moving);
-            }
+            addPiece(moving);
         }
     }
     // if we are castling
@@ -206,7 +208,74 @@ void Board::movePiece(Piece *moving, Square *targetSquare, std::vector<Piece*> &
     lastMoved = moving;
 }
 
-void Board::onClicked(int x, int y)
+void Board::movePieceBack(Piece *moving, Square *targetSquare, std::vector<Piece*> &piecesToAdd)
+{
+    Piece *captured = piecesToAdd[0];
+    Piece *capturedEnPassant = piecesToAdd[1];
+    Piece *pawnPromoted = piecesToAdd[2];
+
+    int rowFrom = moving -> row;
+    int colFrom = moving -> col;
+    int rowTo = targetSquare -> row;
+    int colTo = targetSquare -> col;
+
+    // if we need to undo en passant
+    if (capturedEnPassant != nullptr)
+    {
+        // restore pawn captured by en passant
+        board[capturedEnPassant -> row][capturedEnPassant -> col] -> piece = capturedEnPassant;
+        addPiece(capturedEnPassant);
+    }
+
+    // if we need to undo promotion
+    if (pawnPromoted != nullptr)
+    {
+        // put promoted pawn back where it came from
+        removePiece(moving);
+        moving = pawnPromoted;
+        addPiece(pawnPromoted);
+    }
+
+    // if we want to undo castling
+    if (moving -> type == KING && abs(colFrom - colTo) > 1)
+    {
+        // if we want to un-castle from the left
+        if (colFrom < 4)
+        {
+            // move rook from right of king to left of board
+            Piece *leftRook = board[rowFrom][colFrom + 1] -> piece;
+            leftRook -> col = 0;
+            leftRook -> timesMoved--;
+            board[rowFrom][colFrom + 1] -> piece = nullptr;
+            board[rowTo][0] -> piece = leftRook;
+        }
+        // if we want to un-castle from the right
+        else
+        {
+            // move rook from left of king to right of board
+            Piece *rightRook = board[rowFrom][colFrom - 1] -> piece;
+            rightRook -> col = 7;
+            rightRook -> timesMoved--;
+            board[rowFrom][colFrom - 1] -> piece = nullptr;
+            board[rowTo][7] -> piece = rightRook;
+        }
+    }
+
+    // replace captured piece
+    board[rowFrom][colFrom] -> piece = captured;
+    if (captured != nullptr)
+    {
+        addPiece(captured);
+    }
+
+    // move piece back to where it came from
+    moving -> row = rowTo;
+    moving -> col = colTo;
+    moving -> timesMoved--;
+    targetSquare -> piece = moving;
+}
+
+void Board::onClicked(int x, int y, SDL_Renderer *renderer)
 {
     SDL_Point *mouse = new SDL_Point{x, y};
     for (auto &rank : board)
@@ -220,25 +289,42 @@ void Board::onClicked(int x, int y)
                 if (square -> isHighlighted)
                 {
                     // move the piece the user is moving
-                    std::vector<Piece*> piecesRemoved;
+                    std::vector<Piece*> piecesRemoved(3);
                     movePiece(pieceClicked, square, piecesRemoved);
+                    resetHighlights();
+
+                    // update graphics with the user's move
+                    SDL_RenderClear(renderer);
+                    render(renderer);
+                    SDL_RenderPresent(renderer);
+
+                    // make engine move
+                    makeBestMove();
                     // remember the last piece moved for en passant rights
                     lastMoved = pieceClicked;
-
-                    makeBestMove();
                 }
-                resetHighlights();
-                if (piece != nullptr && piece -> isWhite == ENGINE_IS_BLACK)
+                // if user clicked a piece to move it somewhere
+                else if (!square -> isHighlighted && piece != nullptr && piece -> isWhite == ENGINE_IS_BLACK)
                 {
+                    resetHighlights();
                     // remember piece the player wants to move
                     pieceClicked = piece;
                     // highlight legal moves
-                    std::vector<Square*> moves = getMoves(piece);
+                    std::vector<Square*> moves = getLegalMoves(piece);
                     for (Square* &move : moves)
                     {
                         move -> isHighlighted = true;
                     }
                 }
+                // reset highlights when user clicks elsewhere
+                else
+                {
+                    resetHighlights();
+                }
+                // update graphics
+                SDL_RenderClear(renderer);
+                render(renderer);
+                SDL_RenderPresent(renderer);
             }
         }
     }
@@ -256,28 +342,16 @@ void Board::makeBestMove()
         // choose a random piece of the color we want to move
         if (ENGINE_IS_BLACK)
         {
-            // no legal moves possible because there are no pieces. this will never happen in real chess.
-            if (blackPieces.empty())
-            {
-                // don't move
-                return;
-            }
             pieceToMove = blackPieces[rand() % blackPieces.size()];
         }
         else
         {
-            // no legal moves possible becaue there are no pieces. this will never happen in real chess.
-            if (whitePieces.empty())
-            {
-                // don't move
-                return;
-            }
             pieceToMove = whitePieces[rand() % whitePieces.size()];
         }
-        moves = getMoves(pieceToMove);
+        moves = getLegalMoves(pieceToMove);
 
         // this means we looked through all our pieces and none of them have any moves
-        if (tries++ > 64)
+        if (tries++ > 16)
         {
             // so just don't move
             return;
@@ -285,7 +359,7 @@ void Board::makeBestMove()
     }
 
     Square *move = moves[rand() % moves.size()];
-    std::vector<Piece*> piecesRemoved;
+    std::vector<Piece*> piecesRemoved(3);
     movePiece(pieceToMove, move, piecesRemoved);
 
 }
@@ -561,7 +635,104 @@ std::vector<Square*> Board::getMoves(Piece *moving)
             }
         }
     }
-
     return moves;
+}
 
+bool Board::isSquareAttacked(Square *square, bool attackerIsWhite)
+{
+
+    std::vector<Piece*> *attackers = attackerIsWhite ? &whitePieces : &blackPieces;
+    // go through attacking pieces
+    for (Piece* &attacker : *(attackers))
+    {
+        std::vector<Square*> moves = getMoves(attacker);
+        // look at all the attacks
+        for (Square* &move : moves)
+        {
+            if (move == square)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Board::isInCheck(bool kingIsWhite)
+{
+    Piece *king = kingIsWhite ? whiteKing : blackKing;
+    return isSquareAttacked(board[king -> row][king -> col], !kingIsWhite);
+}
+
+// get the squares a piece can move to accounting for check rules
+std::vector<Square*> Board::getLegalMoves(Piece *moving)
+{
+    std::vector<Square*> legalMoves;
+    std::vector<Square*> moves = getMoves(moving);
+
+    Piece *pieceMoving = moving;
+    Square *from = board[moving -> row][moving -> col];
+
+    bool canCastleLeft = true;
+    bool canCastleRight = true;
+
+    for (Square* &move : moves)
+    {
+        // if we are castling
+        if (pieceMoving -> type == KING && abs(from -> col - move -> col) > 1)
+        {
+            // if we are castling right don't castle out of check or through check
+            if (move -> col > 4)
+            {
+                for (int col = moving -> col; col <= moving -> col + 1; col++)
+                {
+                    if (isSquareAttacked(board[moving -> row][col], !moving -> isWhite))
+                    {
+                        canCastleRight = false;
+                        break;
+                    }
+                }
+                if (!canCastleRight)
+                {
+                    // ignore this move and go to the next one
+                    continue;
+                }
+            }
+            // if we are castling left don't castle out of check or through check
+            else
+            {
+                for (int col = moving -> col - 1; col <= moving -> col; col++)
+                {
+                    if (isSquareAttacked(board[moving -> row][col], !moving -> isWhite))
+                    {
+                        canCastleLeft = false;
+                        break;
+                    }
+                }
+                if (!canCastleLeft)
+                {
+                    // ignore this move and go to the next one
+                    continue;
+                }
+            }
+        }
+
+        // move the piece
+        std::vector<Piece*> piecesRemoved(3);
+        Piece *movedBefore = lastMoved;
+        movePiece(moving, move, piecesRemoved);
+
+        // if we moved a piece and put ourselves in check, that move was illegal
+        if (!isInCheck(moving -> isWhite))
+        {
+            legalMoves.push_back(move);
+        }
+
+        // move the piece back
+        movePieceBack(moving, from, piecesRemoved);
+        // reset moving pointer because it might have turned into a queen
+        moving = pieceMoving;
+        lastMoved = movedBefore;
+    }
+    return legalMoves;
 }
