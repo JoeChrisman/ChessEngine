@@ -30,15 +30,19 @@ public:
     void onClicked(int x, int y, SDL_Renderer *renderer);
     void resetHighlights();
     bool isOnBoard(int row, int col);
-    void movePiece(Piece* &moving, Square *targetSquare, std::vector<Piece*> &piecesRemoved);
-    void movePieceBack(Piece *moving, Square *targetSquare, std::vector<Piece*> &piecesToAdd);
+    std::vector<Piece*> movePiece(int rowFrom, int colFrom, int rowTo, int colTo);
+    void movePieceBack(int rowFrom, int colFrom, int rowTo, int colTo, std::vector<Piece*> &piecesToAdd);
     void addPiece(Piece *toAdd);
     void removePiece(Piece *toRemove);
-    // make a random move
     void makeBestMove();
+    int evaluate();
+    int min(int depth);
+    int max(int depth);
+
+
     bool isSquareAttacked(Square *square, bool attackerIsWhite);
     bool isInCheck(bool kingIsWhite);
-    std::vector<Square*> getLegalMoves(Piece *moving);
+    std::vector<Square*> getLegalMoves(int row, int col);
     std::vector<Square*> getMoves(Piece *moving);
 
 };

@@ -12,6 +12,8 @@
 #include "SDL2/SDL.h"
 
 const bool ENGINE_IS_BLACK = true;
+const int MAX_DEPTH = 3;
+const int MAX_EVAL = 1 << 16;
 
 enum PIECE_TYPE
 {
