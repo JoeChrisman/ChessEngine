@@ -67,6 +67,7 @@ Board::Board()
         board[row] = rank;
     }
 
+    // make engine move if engine is white
     if (!ENGINE_IS_BLACK)
     {
         makeBestMove();
@@ -285,6 +286,7 @@ void Board::onClicked(int x, int y, SDL_Renderer *renderer)
                     // move the piece the user is moving
                     std::vector<Piece*> piecesRemoved(3);
                     movePiece(pieceClicked -> row, pieceClicked -> col, square -> row, square -> col);
+                    int legalMoves = 0;
                     resetHighlights();
 
                     // update graphics with the user's move
@@ -292,8 +294,52 @@ void Board::onClicked(int x, int y, SDL_Renderer *renderer)
                     render(renderer);
                     SDL_RenderPresent(renderer);
 
-                    // make engine move
-                    makeBestMove();
+                    // if the engine had no moves
+                    if (!makeBestMove())
+                    {
+                        // if the engine is in checkmate
+                        if (isInCheck(!ENGINE_IS_BLACK))
+                        {
+                            std::cout << "   |   VICTORY   |   \n";
+                        }
+                        // if the engine is in stalemate
+                        else
+                        {
+                            std::cout << "   |   STALEMATE   |   \n";
+                        }
+                        isRunning = false;
+                        return;
+                    }
+                    // if the engine played a move
+                    else
+                    {
+                        // update graphics
+                        SDL_RenderClear(renderer);
+                        render(renderer);
+                        SDL_RenderPresent(renderer);
+                        // see how many legal moves the player has
+                        int legalMoves = 0;
+                        std::vector<Piece*> playerPieces = ENGINE_IS_BLACK ? whitePieces : blackPieces;
+                        for (Piece *playerPiece : playerPieces)
+                        {
+                            legalMoves += getLegalMoves(playerPiece -> row, playerPiece -> col).size();
+                        }
+                        // if the player has no legal moves
+                        if (legalMoves == 0)
+                        {
+                            // if the player is in checkmate
+                            if (isInCheck(ENGINE_IS_BLACK))
+                            {
+                                std::cout << "   |   DEFEAT   |   \n";
+                            }
+                            else
+                            {
+                                std::cout << "   |   STALEMATE   |   \n";
+                            }
+                            isRunning = false;
+                            return;
+                        }
+                    }
                 }
                 // if user clicked a piece to move it somewhere
                 else if (!square -> isHighlighted && piece != nullptr && piece -> isWhite == ENGINE_IS_BLACK)
@@ -307,16 +353,21 @@ void Board::onClicked(int x, int y, SDL_Renderer *renderer)
                     {
                         move -> isHighlighted = true;
                     }
+                    // update graphics
+                    SDL_RenderClear(renderer);
+                    render(renderer);
+                    SDL_RenderPresent(renderer);
                 }
                 // reset highlights when user clicks elsewhere
                 else
                 {
                     resetHighlights();
+                    // update graphics
+                    SDL_RenderClear(renderer);
+                    render(renderer);
+                    SDL_RenderPresent(renderer);
                 }
-                // update graphics
-                SDL_RenderClear(renderer);
-                render(renderer);
-                SDL_RenderPresent(renderer);
+                return;
             }
         }
     }
@@ -327,23 +378,110 @@ int Board::evaluate()
 {
     std::vector<Piece*> &enginePieces = ENGINE_IS_BLACK ? blackPieces : whitePieces;
     std::vector<Piece*> &playerPieces = ENGINE_IS_BLACK ? whitePieces : blackPieces;
+    Piece *engineKing = ENGINE_IS_BLACK ? blackKing : whiteKing;
+    Piece *playerKing = ENGINE_IS_BLACK ? whiteKing : blackKing;
+    int originalKingCol = ENGINE_IS_BLACK ? 4 : 3;
 
     // the order here corresponds to the ordering of PIECE_TYPE in Constants.h
-    int pieceScores[] = {10, 70, 100, 140, 320, 0};
+    int pieceScores[] = {100, 1500, 1900, 2500, 5000, 0};
+    int score = 0;
 
-    int materialScore = 0;
-
+    // go through the engine's pieces
     for (Piece *enginePiece : enginePieces)
     {
-        materialScore += pieceScores[enginePiece -> type];
+        PIECE_TYPE type = enginePiece -> type;
+        // the engine gained some material advantage
+        score += pieceScores[type];
+        if (type == KNIGHT || type == BISHOP || type == PAWN)
+        {
+            // an engine's piece in the center is a good piece for the engine
+            if (enginePiece -> row > 1 && enginePiece -> col > 1 &&
+                enginePiece -> row < 6 && enginePiece -> col < 6)
+            {
+                // the engine gained some positional advantage
+                score += pieceScores[PAWN] / (type == PAWN ? 5 : 3);
+            }
+
+            if (type == PAWN)
+            {
+                if (enginePiece -> row > 2 && enginePiece -> col > 2 &&
+                    enginePiece -> row < 5 && enginePiece -> col < 5)
+                {
+                    // the engine having a pawn in the center four squares is good for the engine
+                    score += pieceScores[PAWN] / 2;
+                    if (enginePiece -> row == (ENGINE_IS_BLACK ? 3 : 2))
+                    {
+                        // the engine having a pawn in the center pushed three squares is good for the engine
+                        score += pieceScores[PAWN];
+                    }
+                }
+            }
+        }
+        // an engine piece that hasn't moved is bad for the engine
+        if (type == KNIGHT || type == BISHOP)
+        {
+            if (enginePiece -> timesMoved == 0)
+            {
+                // the engine lost some positional advantage
+                score -= pieceScores[PAWN] / 10;
+            }
+        }
+        // the engine's castled king is bad for the player
+        if (type == KING && enginePiece -> timesMoved == 1 && abs(enginePiece -> col - originalKingCol) > 1)
+        {
+            // the engine gained some king safety advantage
+            score += pieceScores[PAWN];
+        }
     }
 
     for (Piece *playerPiece : playerPieces)
     {
-        materialScore -= pieceScores[playerPiece -> type];
+        PIECE_TYPE type = playerPiece -> type;
+        // the engine lost some material advantage
+        score -= pieceScores[type];
+
+        // a player's piece in the center is a bad piece for the engine
+        if (type == KNIGHT || type == BISHOP || type == PAWN)
+        {
+            if (playerPiece -> row > 1 && playerPiece -> col > 1 &&
+                playerPiece -> row < 6 && playerPiece -> col < 6)
+            {
+                // the engine lost some positional advantage
+                score -= pieceScores[PAWN] / (type == PAWN ? 5 : 3);
+                if (type == PAWN)
+                {
+                    if (playerPiece -> row > 2 && playerPiece -> col > 2 &&
+                        playerPiece -> row < 5 && playerPiece -> col < 5)
+                    {
+                        // the player having a pawn in the center four squares is bad for the engine
+                        score -= pieceScores[PAWN] / 2;
+                        if (playerPiece -> row == (ENGINE_IS_BLACK ? 2 : 3))
+                        {
+                            // the player having a pawn in the center pushed three squares is bad for the engine
+                            score -= pieceScores[PAWN];
+                        }
+                    }
+                }
+            }
+        }
+        // a player's piece that hasn't moved is bad for the player
+        if (type == KNIGHT || type == BISHOP)
+        {
+            if (playerPiece -> timesMoved == 0)
+            {
+                // the engine gained some positional advantage
+                score += pieceScores[PAWN] / 10;
+            }
+        }
+        // the player's castled king is bad for the engine
+        if (type == KING && playerPiece -> timesMoved == 1 && abs(playerPiece -> col - originalKingCol) > 1)
+        {
+            // the engine lost some attacking advantage
+            score -= pieceScores[PAWN];
+        }
     }
 
-    return materialScore;
+    return score;
 }
 
 void Board::resetHighlights()
@@ -713,135 +851,181 @@ std::vector<Square*> Board::getLegalMoves(int row, int col)
     return legalMoves;
 }
 
-// make all possible moves for the player, and evaluate further recursively with max(depth + 1)
-int Board::min(int depth)
+int Board::minimax(int depth, bool isMaximizing)
 {
+    // if we are done evaluating for this line return the evaluation of the position
     if (depth >= MAX_DEPTH)
     {
         return evaluate();
     }
-    // we want to minimise the evaluations of further positions
-    int bestEval = MAX_EVAL;
-    std::vector<Piece*> playerPieces = ENGINE_IS_BLACK ? whitePieces : blackPieces;
-
-    // go through all the player's pieces
-    for (Piece* &moving : playerPieces)
+    // if we are evaluating a move for the engine
+    if (isMaximizing)
     {
-        int row = moving -> row;
-        int col = moving -> col;
-
-        std::vector<Square*> moves = getLegalMoves(row, col);
-        // go through all the piece's legal moves
-        for (Square* &move : moves)
+        // we want to maximize the returning evaluations, so start with the smallest possible number
+        int bestEval = -MAX_EVAL;
+        bool foundMove = false;
+        std::vector<Piece*> enginePieces = ENGINE_IS_BLACK ? blackPieces : whitePieces;
+        // go through each of the engine's pieces
+        for (Piece *enginePiece : enginePieces)
         {
-            // move the piece
-            Piece *movedBefore = lastMoved;
-            std::vector<Piece*> piecesRemoved = movePiece(row, col, move -> row, move -> col);
-
-            // evaluate recursively
-            int evaluation = max(depth + 1);
-            // remember smallest evaluation
-            if (evaluation <= bestEval)
+            int row = enginePiece -> row;
+            int col = enginePiece -> col;
+            // go through each of the piece's moves
+            std::vector<Square*> moves = getLegalMoves(row, col);
+            for (Square *move : moves)
             {
-                bestEval = evaluation;
-            }
+                // move the piece
+                Piece *movedBefore = lastMoved;
+                std::vector<Piece*> piecesRemoved = movePiece(row, col, move -> row, move -> col);
 
-            // move the piece back
-            movePieceBack(move -> row, move -> col, row, col,piecesRemoved);
-            lastMoved = movedBefore;
+                // recursively generate optimal evaluations for future moves
+                int evaluation = minimax(depth + 1, !isMaximizing);
+                if (evaluation >= bestEval)
+                {
+                    bestEval = evaluation;
+                    foundMove = true;
+                }
+
+                // move the piece back
+                movePieceBack(move -> row, move -> col, row, col, piecesRemoved);
+                lastMoved = movedBefore;
+            }
         }
+        if (!foundMove)
+        {
+            // checkmate
+            if (isInCheck(!ENGINE_IS_BLACK))
+            {
+                // a faster checkmate should have a lower evaluation
+                return -MAX_EVAL + depth;
+            }
+            // stalemate
+            return 0;
+        }
+        // return the highest evaluation we could find
+        return bestEval;
     }
-    return bestEval;
+    // if we are evaluating a move for the player
+    else
+    {
+        // we want to minimize the returning evaluations, so start with the largest possible number
+        int bestEval = MAX_EVAL;
+        bool foundMove = false;
+        std::vector<Piece*> playerPieces = ENGINE_IS_BLACK ? whitePieces : blackPieces;
+        // go through each of the player's pieces
+        for (Piece *playerPiece : playerPieces)
+        {
+            int row = playerPiece -> row;
+            int col = playerPiece -> col;
+            // go through each of the piece's moves
+            std::vector<Square*> moves = getLegalMoves(row, col);
+            for (Square *move : moves)
+            {
+                // move the piece
+                Piece *movedBefore = lastMoved;
+                std::vector<Piece*> piecesRemoved = movePiece(row, col, move -> row, move -> col);
+
+                // recursively generate optimal evaluations for future moves
+                int evaluation = minimax(depth + 1, !isMaximizing);
+                if (evaluation <= bestEval)
+                {
+                    bestEval = evaluation;
+                    foundMove = true;
+                }
+
+                // move the piece back
+                movePieceBack(move -> row, move -> col, row, col, piecesRemoved);
+                lastMoved = movedBefore;
+            }
+        }
+        if (!foundMove)
+        {
+            // checkmate
+            if (isInCheck(ENGINE_IS_BLACK))
+            {
+                // a faster checkmate should have a higher evaluation
+                return MAX_EVAL - depth;
+            }
+            // stalemate
+            return 0;
+        }
+        // return the lowest evaluation we could find
+        return bestEval;
+    }
 }
 
-// make all possible moves for the engine, and evaluate further recursively with min(depth + 1)
-int Board::max(int depth)
+// make the engine make what it thinks is the best move
+// returns true if the engine had a legal move
+bool Board::makeBestMove()
 {
-    if (depth >= MAX_DEPTH)
-    {
-        return evaluate();
-    }
-    // we want to maximize the evaluations of further positions
+    // we want a piece to move to a square
+    Piece *chosenPiece = nullptr;
+    Square *chosenSquare = nullptr;
+
+    // we want to choose the move with the highest minimax evaluation
     int bestEval = -MAX_EVAL;
+    // go through each of the engine's pieces
     std::vector<Piece*> enginePieces = ENGINE_IS_BLACK ? blackPieces : whitePieces;
-
-    // go through all the engine's pieces
-    for (Piece* &moving : enginePieces)
+    for (Piece *enginePiece : enginePieces)
     {
-        int row = moving -> row;
-        int col = moving -> col;
-
+        int row = enginePiece -> row;
+        int col = enginePiece -> col;
+        // go through each of the piece's moves
         std::vector<Square*> moves = getLegalMoves(row, col);
-        // go through all the piece's legal moves
-        for (Square* &move : moves)
+        for (Square *move : moves)
         {
             // move the piece
             Piece *movedBefore = lastMoved;
             std::vector<Piece*> piecesRemoved = movePiece(row, col, move -> row, move -> col);
-
-            // evaluate further recursively
-            int evaluation = min(depth + 1);
+            // evaluate the move recursively starting by minimizing evaluations (because the minimizing player is next)
+            int evaluation = minimax(0, false);
             if (evaluation >= bestEval)
             {
                 bestEval = evaluation;
+                chosenPiece = enginePiece;
+                chosenSquare = move;
             }
-
             // move the piece back
             movePieceBack(move -> row, move -> col, row, col, piecesRemoved);
             lastMoved = movedBefore;
-        }
-    }
-    return bestEval;
-}
-
-void Board::makeBestMove()
-{
-    // we want to maximise the evaluations of further positions
-    int bestEval = -MAX_EVAL;
-    std::vector<Piece*> enginePieces = ENGINE_IS_BLACK ? blackPieces : whitePieces;
-    Piece *bestPieceToMove;
-    Square *bestSquareToMoveTo;
-
-    // go through all the engine's pieces
-    for (Piece* &moving : enginePieces)
-    {
-        int row = moving -> row;
-        int col = moving -> col;
-
-        std::vector<Square*> moves = getLegalMoves(row, col);
-        // go through all the piece's moves
-        for (Square* &move : moves)
-        {
-            // move the piece
-            Piece *movedBefore = lastMoved;
-            std::vector<Piece*> piecesRemoved = movePiece(row, col, move -> row, move -> col);
-
-            int evaluation = min(0);
             /*
-            std::cout << "piece address: " << moving << "   |   ";
+            std::cout << "piece address: " << enginePiece << "   |   ";
             std::cout << "from: (" << row << ", " << col << ")   |   ";
             std::cout << "to: (" << move -> row << ", " << move -> col << ")   |   ";
             std::cout << "legalMoves: " << moves.size() << "   |   ";
             std::cout << "evaluation: " << evaluation << std::endl;*/
-
-            // choose the move with the highest evaluation
-            if (evaluation >= bestEval)
-            {
-                bestEval = evaluation;
-                bestPieceToMove = moving;
-                bestSquareToMoveTo = move;
-            }
-
-            // move the piece back
-            movePieceBack(move -> row, move -> col, row, col, piecesRemoved);
-            lastMoved = movedBefore;
         }
     }
-    // move the best piece to the best square
-    movePiece(bestPieceToMove -> row, bestPieceToMove -> col, bestSquareToMoveTo -> row, bestSquareToMoveTo -> col);
-    /*
-    std::cout << "number of white pieces: " << whitePieces.size() << std::endl;
-    std::cout << "number of black pieces: " << blackPieces.size() << std::endl;*/
-
+    // if there were no legal moves
+    if (chosenPiece == nullptr || chosenSquare == nullptr)
+    {
+        isRunning = false;
+        return false;
+    }
+    else
+    {
+        // if we found a move make the engine's top move
+        movePiece(chosenPiece -> row, chosenPiece -> col, chosenSquare -> row, chosenSquare -> col);
+        /*
+        std::cout << "white pieces: " << whitePieces.size() << std::endl;
+        std::cout << "black pieces: " << blackPieces.size() << std::endl;
+        std::cout << "current evaluation: " << bestEval << std::endl;*/
+    }
+    return true;
 
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

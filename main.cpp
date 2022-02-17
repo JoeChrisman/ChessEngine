@@ -22,7 +22,7 @@ void run()
     {
         if (SDL_PollEvent(&event))
         {
-            if (event.type == SDL_MOUSEBUTTONDOWN)
+            if (event.type == SDL_MOUSEBUTTONDOWN && board.isRunning)
             {
                 board.onClicked(event.button.x, event.button.y, renderer);
             }

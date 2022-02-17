@@ -26,18 +26,23 @@ public:
     // keep track of last piece moved for en passant
     Piece *lastMoved;
 
+    bool isRunning = true;
+
     void render(SDL_Renderer *renderer);
     void onClicked(int x, int y, SDL_Renderer *renderer);
     void resetHighlights();
     bool isOnBoard(int row, int col);
+    int distance(int ax, int ay, int bx, int by);
     std::vector<Piece*> movePiece(int rowFrom, int colFrom, int rowTo, int colTo);
     void movePieceBack(int rowFrom, int colFrom, int rowTo, int colTo, std::vector<Piece*> &piecesToAdd);
     void addPiece(Piece *toAdd);
     void removePiece(Piece *toRemove);
-    void makeBestMove();
+    // make the best move according to the engine. returns true if the engine had a legal move
+    bool makeBestMove();
     int evaluate();
     int min(int depth);
     int max(int depth);
+    int minimax(int depth, bool engineToMove);
 
 
     bool isSquareAttacked(Square *square, bool attackerIsWhite);
